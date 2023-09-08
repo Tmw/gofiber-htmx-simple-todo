@@ -1,0 +1,16 @@
+<div
+  id="row-{{.ID}}"
+  class="bg-indigo-50 rounded-s p-4 my-2 shadow-sm hover:scale-105 transition-all hover:shadow-md flex flex-row items-center gap-4 cursor-pointer"
+  hx-put="/todos/{{.ID}}/toggle"
+  hx-swap="outerHTML"
+  hx-target="#todo-list"
+  hx-select="#todo-list"
+>
+  {{if .DoneAt}}
+  <input type="checkbox" checked="checked" class="w-6 h-6" />
+  <span class="text-xl line-through">{{.Title}}</span>
+  {{else}}
+  <input type="checkbox" class="w-6 h-6" />
+  <span class="text-xl">{{.Title}}</span>
+  {{end}}
+</div>
