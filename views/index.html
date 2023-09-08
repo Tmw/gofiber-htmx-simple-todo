@@ -1,4 +1,6 @@
-<div class="w-full h-full bg-gradient-to-b from-indigo-100 to-indigo-200 flex flex-col">
+<div
+  class="w-full h-full bg-gradient-to-b from-indigo-100 to-indigo-200 flex flex-col"
+>
   <!-- navigation -->
   <div class="bg-indigo-400 w-full py-5 px-4">
     <h1 class="text-indigo-200 text-2xl">todoist</h1>
@@ -7,7 +9,29 @@
   <!-- main content wrapper -->
   <div class="flex-grow w-full">
     <!-- counter wrapper -->
-    <div id="todo-list" class="h-full flex flex-col justify-center items-center">
+    <div
+      id="todo-list"
+      class="h-full flex flex-col justify-center items-center"
+    >
+      <div id="new-todo" class="w-2/3">
+        <div id="row-{{.ID}}" class="p-0 my-0 flex flex-row">
+          <form
+            hx-post="/todos"
+            hx-swap="outerHTML"
+            hx-target="#todo-list"
+            hx-select="#todo-list"
+            class="w-full p-0 m-0"
+          >
+            <input
+              type="text"
+              name="todo"
+              class="w-full bg-indigo-50 p-4 rounded-s shadow-sm"
+              placeholder="your new todo here"
+              autofocus
+            />
+          </form>
+        </div>
+      </div>
       <div id="todos-open" class="w-2/3">
         {{range .todos_open}} {{template "partials/todo" .}} {{end}}
       </div>
@@ -15,7 +39,9 @@
       {{ if .todos_done | hasItems }}
       <div class="w-2/3 relative flex justify-center">
         <div class="absolute w-full top-1/2 border-b border-b-indigo-300"></div>
-        <div class="bg-indigo-300 z-10 w-fit rounded-full py-1 px-4 text-xs text-white uppercase">
+        <div
+          class="bg-indigo-300 z-10 w-fit rounded-full py-1 px-4 text-xs text-white uppercase"
+        >
           {{.todos_done | len }} done
         </div>
       </div>

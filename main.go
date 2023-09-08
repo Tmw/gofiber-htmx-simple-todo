@@ -88,6 +88,9 @@ func main() {
 	engine.Reload(true)
 	app := fiber.New(fiber.Config{
 		Views: engine,
+
+		// Let's reel it in with the performance and have a sane default here
+		Immutable: true,
 	})
 
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -127,6 +130,18 @@ func main() {
 		} else {
 			todo.DoneAt = nil
 		}
+
+		locals := fiber.Map{
+			"todos_open": todosByDone(false),
+			"todos_done": todosByDone(true),
+		}
+
+		return c.Render("index", locals)
+	})
+
+	app.Post("/todos", func(c *fiber.Ctx) error {
+		newTodo := c.FormValue("todo", "unknown")
+		todos = append(todos, NewTodo(newTodo, false))
 
 		locals := fiber.Map{
 			"todos_open": todosByDone(false),
