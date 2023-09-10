@@ -4,9 +4,8 @@
   hx-put="/todos/{{.ID}}/toggle"
   hx-swap="outerHTML"
   hx-target="#todo-list"
-  hx-select="#todo-list"
 >
-  {{if .DoneAt}}
+  {{if .CompletedAt}}
   <input type="checkbox" checked="checked" class="w-6 h-6" />
   <span class="text-xl line-through">{{.Title}}</span>
   {{else}}

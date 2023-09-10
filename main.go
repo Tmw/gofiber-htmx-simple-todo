@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"html/template"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,144 +14,164 @@ import (
 )
 
 type Todo struct {
-	ID     int
-	Title  string
-	DoneAt *time.Time
+	ID          int64
+	Title       string
+	CompletedAt *time.Time
+	CreatedAt   time.Time
 }
 
-func NewTodo(title string, done bool) Todo {
-	var doneAt *time.Time
-	id := todoId
-	todoId++
+type TodoRepo struct {
+	todoLock sync.Mutex
+	todos    []Todo
 
-	if done {
+	nextID atomic.Int64
+}
+
+func (r *TodoRepo) Add(todo Todo) {
+	todo.ID = r.nextID.Add(1)
+
+	r.todoLock.Lock()
+	r.todos = append(r.todos, todo)
+	r.todoLock.Unlock()
+}
+
+func (r *TodoRepo) Toggle(todoID int64) (*Todo, error) {
+	todo := r.Get(todoID)
+	if todo == nil {
+		return nil, fmt.Errorf("Unable to find todo with ID: %d", todoID)
+	}
+
+	if todo.CompletedAt == nil {
 		now := time.Now()
-		doneAt = &now
+		todo.CompletedAt = &now
+	} else {
+		todo.CompletedAt = nil
 	}
 
-	return Todo{ID: id, Title: title, DoneAt: doneAt}
+	return nil, nil
 }
 
-func todoById(id int) (*Todo, error) {
-	for idx := range todos {
-		todo := &todos[idx]
-		if todo.ID == id {
-			return todo, nil
+func (r *TodoRepo) Get(todoID int64) *Todo {
+	for idx := range r.todos {
+		todo := &r.todos[idx]
+		if todo.ID == todoID {
+			return todo
 		}
 	}
 
-	return nil, fmt.Errorf("Unable to find todo with id: %d", id)
+	return nil
 }
 
-func todosByDone(done bool) []*Todo {
-	var res []*Todo
+func (r *TodoRepo) ListByStatus(done bool) []Todo {
+	var res []Todo
 
-	for idx := range todos {
-		if done && todos[idx].DoneAt != nil || !done && todos[idx].DoneAt == nil {
-			res = append(res, &todos[idx])
+	for idx := range r.todos {
+		if done && r.todos[idx].CompletedAt != nil || !done && r.todos[idx].CompletedAt == nil {
+			res = append(res, r.todos[idx])
 		}
 	}
 
+	// sort todos by CompletedAt if available on both items,
+	// else fall back to comparing based on CreatedAt
 	sort.Slice(res, func(i, j int) bool {
 		todoA := res[i]
 		todoB := res[j]
 
-		if todoA.DoneAt == nil || todoB.DoneAt == nil {
-			return false
+		if todoA.CompletedAt != nil && todoB.CompletedAt != nil {
+			return todoB.CompletedAt.Before(*todoA.CompletedAt)
 		}
-		return todoB.DoneAt.Before(*todoA.DoneAt)
+
+		return todoB.CreatedAt.Before(todoA.CreatedAt)
 	})
 
 	return res
 }
 
-var (
-	todoId = 1
-	todos  = []Todo{
-		NewTodo("first todo", false),
-		NewTodo("second todo", false),
-		NewTodo("third todo", false),
-		NewTodo("fourth todo", true),
-		NewTodo("fifth todo", true),
+func NewTodo(title string, done bool) Todo {
+	var completedAt *time.Time
+	now := time.Now()
+
+	if done {
+		completedAt = &now
 	}
-)
+
+	return Todo{
+		Title:       title,
+		CompletedAt: completedAt,
+		CreatedAt:   now,
+	}
+}
+
+var todoRepo TodoRepo
 
 func main() {
 	engine := html.New("./views", ".html")
+	todoRepo = TodoRepo{}
+	todoRepo.Add(NewTodo("first todo", false))
+	todoRepo.Add(NewTodo("second todo", false))
+	todoRepo.Add(NewTodo("third todo", false))
+	todoRepo.Add(NewTodo("fourth todo", true))
+	todoRepo.Add(NewTodo("fifth todo", true))
 
-	engine.AddFunc("len", func(s []*Todo) template.HTML {
+	engine.AddFunc("len", func(s []Todo) template.HTML {
 		return template.HTML(fmt.Sprint(len(s)))
 	})
 
-	engine.AddFunc("hasItems", func(s []*Todo) bool {
+	engine.AddFunc("hasItems", func(s []Todo) bool {
 		return len(s) > 0
 	})
 
 	engine.Reload(true)
 	app := fiber.New(fiber.Config{
-		Views: engine,
-
-		// Let's reel it in with the performance and have a sane default here
+		Views:     engine,
 		Immutable: true,
 	})
 
-	app.Get("/", func(c *fiber.Ctx) error {
-		locals := fiber.Map{
-			"todos_open": todosByDone(false),
-			"todos_done": todosByDone(true),
-		}
+	app.Get("/", handleGetIndex)
+	app.Get("/todos", handleGetTodoList)
+	app.Put("/todos/:todo_id/toggle", handleToggleTodo)
+	app.Post("/todos", handlePostTodo)
 
-		return c.Render("index", locals, "layouts/main")
-	})
+	log.Fatal(app.Listen(":3000"))
+}
 
-	app.Get("/todos", func(c *fiber.Ctx) error {
-		locals := fiber.Map{
-			"todos_open": todosByDone(false),
-			"todos_done": todosByDone(true),
-		}
+func handleGetIndex(c *fiber.Ctx) error {
+	locals := fiber.Map{
+		"todos_open": todoRepo.ListByStatus(false),
+		"todos_done": todoRepo.ListByStatus(true),
+	}
 
-		return c.Render("index", locals)
-	})
+	return c.Render("index", locals, "layouts/main")
+}
 
-	app.Put("/todos/:todo_id/toggle", func(c *fiber.Ctx) error {
-		todoId, err := c.ParamsInt("todo_id")
-		if err != nil {
-			log.Info("unable to parse todo_id", err)
-			return c.SendStatus(404)
-		}
+func handleToggleTodo(c *fiber.Ctx) error {
+	todoId, err := c.ParamsInt("todo_id")
+	if err != nil {
+		log.Info("unable to parse todo_id", err)
+		return c.SendStatus(404)
+	}
 
-		todo, err := todoById(todoId)
-		if err != nil {
-			log.Info("unable to find todo by id", err)
-			return c.SendStatus(404)
-		}
+	_, err = todoRepo.Toggle(int64(todoId))
+	if err != nil {
+		log.Info("unable to find todo by id", err)
+		return c.SendStatus(404)
+	}
 
-		if todo.DoneAt == nil {
-			now := time.Now()
-			todo.DoneAt = &now
-		} else {
-			todo.DoneAt = nil
-		}
+	return handleGetTodoList(c)
+}
 
-		locals := fiber.Map{
-			"todos_open": todosByDone(false),
-			"todos_done": todosByDone(true),
-		}
+func handlePostTodo(c *fiber.Ctx) error {
+	title := c.FormValue("todo", "unknown")
+	todoRepo.Add(NewTodo(title, false))
 
-		return c.Render("index", locals)
-	})
+	return handleGetTodoList(c)
+}
 
-	app.Post("/todos", func(c *fiber.Ctx) error {
-		newTodo := c.FormValue("todo", "unknown")
-		todos = append(todos, NewTodo(newTodo, false))
+func handleGetTodoList(c *fiber.Ctx) error {
+	locals := fiber.Map{
+		"todos_open": todoRepo.ListByStatus(false),
+		"todos_done": todoRepo.ListByStatus(true),
+	}
 
-		locals := fiber.Map{
-			"todos_open": todosByDone(false),
-			"todos_done": todosByDone(true),
-		}
-
-		return c.Render("index", locals)
-	})
-
-	app.Listen(":3000")
+	return c.Render("partials/todo-list", locals)
 }
