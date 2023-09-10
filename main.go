@@ -51,6 +51,26 @@ func (r *TodoRepo) Toggle(todoID int64) (*Todo, error) {
 	return nil, nil
 }
 
+func (r *TodoRepo) Delete(todoID int64) error {
+	r.todoLock.Lock()
+	defer r.todoLock.Unlock()
+
+	var todoIndex = -1
+	for idx, todo := range r.todos {
+		if todo.ID == todoID {
+			todoIndex = idx
+			break
+		}
+	}
+
+	if todoIndex == -1 {
+		return fmt.Errorf("Unable to find todo with ID: %d", todoID)
+	}
+
+	r.todos = append(r.todos[:todoIndex], r.todos[todoIndex+1:]...)
+	return nil
+}
+
 func (r *TodoRepo) Get(todoID int64) *Todo {
 	for idx := range r.todos {
 		todo := &r.todos[idx]
@@ -130,6 +150,7 @@ func main() {
 	app.Get("/", handleGetIndex)
 	app.Get("/todos", handleGetTodoList)
 	app.Put("/todos/:todo_id/toggle", handleToggleTodo)
+	app.Delete("/todos/:todo_id", handleDeleteTodo)
 	app.Post("/todos", handlePostTodo)
 
 	log.Fatal(app.Listen(":3000"))
@@ -152,6 +173,22 @@ func handleToggleTodo(c *fiber.Ctx) error {
 	}
 
 	_, err = todoRepo.Toggle(int64(todoId))
+	if err != nil {
+		log.Info("unable to find todo by id", err)
+		return c.SendStatus(404)
+	}
+
+	return handleGetTodoList(c)
+}
+
+func handleDeleteTodo(c *fiber.Ctx) error {
+	todoId, err := c.ParamsInt("todo_id")
+	if err != nil {
+		log.Info("unable to parse todo_id", err)
+		return c.SendStatus(404)
+	}
+
+	err = todoRepo.Delete(int64(todoId))
 	if err != nil {
 		log.Info("unable to find todo by id", err)
 		return c.SendStatus(404)
